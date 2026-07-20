@@ -248,6 +248,12 @@ export class InstrumentLLM {
 
       responsePreview = this.redactPII(responseText.substring(0, 150));
       totalTokens = promptTokens + completionTokens;
+      if (totalTokens === 0 && responseText.length > 0) {
+        const promptString = messages.map(m => m.content).join(' ');
+        promptTokens = Math.ceil(promptString.length / 4);
+        completionTokens = Math.ceil(responseText.length / 4);
+        totalTokens = promptTokens + completionTokens;
+      }
       success = true;
       if (statusStr === 'failure') statusStr = 'success';
     } catch (error: any) {

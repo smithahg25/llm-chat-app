@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Message } from '../types';
-import { Send, User, Bot, Loader2, RotateCcw, XCircle } from 'lucide-react';
+import { Send, User, Bot, Loader2, RotateCcw, XCircle, Paperclip } from 'lucide-react';
 import { api } from '../api';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
@@ -24,6 +24,21 @@ export default function Chat({ activeId, onConversationCreated, onNewLog, provid
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setInput(prev => prev + (prev ? '\n\n' : '') + `[File content from ${file.name}]:\n${text}\n`);
+      toast.success(`Attached ${file.name}`);
+    };
+    reader.onerror = () => toast.error('Failed to read file');
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   useEffect(() => {
     if (activeId) {
@@ -183,6 +198,10 @@ export default function Chat({ activeId, onConversationCreated, onNewLog, provid
               <RotateCcw size={20} />
             </button>
           )}
+          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".txt,.md,.json,.csv,.ts,.js,.py" className="hidden" />
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isLoading} className="p-3 rounded-xl bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors disabled:opacity-50" title="Attach Text File">
+            <Paperclip size={20} />
+          </button>
           <input
             type="text"
             value={input}
