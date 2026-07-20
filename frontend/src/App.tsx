@@ -145,8 +145,8 @@ function App() {
         onPageChange={setConvPage}
         onPageSizeChange={setConvPageSize}
       />
-      <div className="flex-1 flex flex-col relative">
-        <div className="absolute top-4 right-4 z-10 flex gap-2">
+      <div className="flex-1 flex flex-col bg-gray-950">
+        <div className="flex justify-end items-center gap-2 p-3 bg-gray-900 border-b border-gray-800 shrink-0">
            <select 
              className="bg-gray-800 text-white px-3 py-1 rounded-md text-sm border border-gray-700 focus:outline-none" 
              value={provider} 
@@ -181,17 +181,19 @@ function App() {
              Logout
            </button>
         </div>
-        <Chat
-          key={activeId || `new-${newChatCounter}`}
-          activeId={activeId}
-          onConversationCreated={(id) => {
-            setActiveId(id);
-            loadConversations(searchQuery);
-          }}
-          onNewLog={loadLogs}
-          provider={provider}
-          model={model}
-        />
+        <div className="flex-1 overflow-hidden">
+          <Chat
+            key={activeId || `new-${newChatCounter}`}
+            activeId={activeId}
+            onConversationCreated={(id) => {
+              setActiveId(id);
+              loadConversations(searchQuery);
+            }}
+            onNewLog={loadLogs}
+            provider={provider}
+            model={model}
+          />
+        </div>
       </div>
       <MetadataPanel 
         logs={logs} 

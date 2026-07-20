@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { InferenceLog } from '../types';
-import { Activity, Clock, Zap, Cpu, AlertCircle, CheckCircle2, Download, BarChart2 } from 'lucide-react';
+import { Activity, Clock, Zap, Cpu, AlertCircle, CheckCircle2, Download, BarChart2, Maximize2, Minimize2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { LineChart, Line, BarChart, Bar, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, XAxis } from 'recharts';
 import { api } from '../api';
@@ -19,6 +19,7 @@ export default function MetadataPanel({ logs, page, pageSize, total, onPageChang
   const [activeTab, setActiveTab] = useState<'logs' | 'throughput' | 'batching'>('logs');
   const [timeRange, setTimeRange] = useState('1h');
   const [throughputData, setThroughputData] = useState<any>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'throughput') {
@@ -80,10 +81,13 @@ export default function MetadataPanel({ logs, page, pageSize, total, onPageChang
   ].filter(d => d.value > 0);
 
   return (
-    <div className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col h-full overflow-hidden">
+    <div className={`${isExpanded ? 'w-[450px]' : 'w-80'} transition-all duration-300 ease-in-out bg-gray-900 border-l border-gray-800 flex flex-col h-full overflow-hidden shrink-0 relative`}>
       <div className="p-4 border-b border-gray-800 flex flex-col gap-3 bg-gray-900/50">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
+            <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-800 transition-colors mr-1">
+              {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
             <Activity size={20} className="text-blue-400" />
             <h2 className="text-lg font-semibold text-gray-100">Observability</h2>
           </div>
