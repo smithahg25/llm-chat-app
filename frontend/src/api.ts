@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Conversation, Message, InferenceLog } from './types';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export const api = {
   getConversations: async (q?: string): Promise<Conversation[]> => {
