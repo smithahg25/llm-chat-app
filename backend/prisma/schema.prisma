@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  title     String
+  status    String    @default("active")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+  logs      InferenceLog[]
+
+  @@index([createdAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  role           String
+  content        String
+  timestamp      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([timestamp])
+}
+
+model InferenceLog {
+  id               String       @id @default(uuid())
+  conversationId   String?
+  provider         String
+  model            String
+  latency          Int
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  status           String
+  error            String?
+  requestPreview   String?
+  responsePreview  String?
+  timestamp        DateTime     @default(now())
+  requestId        String?
+  sessionId        String?
+  conversation     Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([timestamp])
+  @@index([requestId])
+}
