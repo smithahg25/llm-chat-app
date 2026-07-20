@@ -27,7 +27,7 @@ export default function Chat({ activeId, onConversationCreated, onNewLog, provid
 
   useEffect(() => {
     if (activeId) {
-      api.getMessages(activeId).then(setMessages).catch(() => toast.error('Failed to load messages'));
+      api.getMessages(activeId).then(res => setMessages(res.data)).catch(() => toast.error('Failed to load messages'));
     } else {
       setMessages([]);
     }

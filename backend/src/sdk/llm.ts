@@ -5,9 +5,84 @@ import Groq from 'groq-sdk';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 import { logger } from '../logger';
 
 dotenv.config();
+
+class BatchingIngester {
+  private queue: any[] = [];
+  private seenLogIds = new Set<string>();
+  private flushTimer: NodeJS.Timeout | null = null;
+  private ingestBatchUrl = `http://localhost:${process.env.PORT || 3001}/ingest/batch`;
+  private ingestUrl = `http://localhost:${process.env.PORT || 3001}/ingest`;
+
+  public enableBatching = true;
+  public lastFlush: Date | null = null;
+  public failedBatchCount = 0;
+  public totalBatchesSent = 0;
+  public totalLogsSent = 0;
+  
+  constructor() {
+    this.startTimer();
+  }
+
+  private startTimer() {
+    if (this.flushTimer) clearInterval(this.flushTimer);
+    this.flushTimer = setInterval(() => this.flush(), 5000);
+  }
+
+  private getToken() {
+    return jwt.sign({ username: 'system' }, process.env.JWT_SECRET || 'super-secret-jwt-key');
+  }
+
+  public enqueue(log: any) {
+    if (!this.enableBatching) {
+      axios.post(this.ingestUrl, log, { headers: { Authorization: `Bearer ${this.getToken()}` } }).catch(err => logger.error({ err }, 'Failed to ingest log'));
+      return;
+    }
+    
+    const logId = log.requestId;
+    if (this.seenLogIds.has(logId)) return;
+    this.seenLogIds.add(logId);
+    if (this.seenLogIds.size > 10000) this.seenLogIds.clear();
+
+    this.queue.push(log);
+    
+    if (this.queue.length >= 50) {
+      this.flush();
+      this.startTimer();
+    }
+  }
+
+  private async flush() {
+    if (this.queue.length === 0) return;
+    const batch = [...this.queue];
+    this.queue = [];
+    
+    try {
+      await axios.post(this.ingestBatchUrl, { logs: batch }, { headers: { Authorization: `Bearer ${this.getToken()}` } });
+      this.lastFlush = new Date();
+      this.totalBatchesSent++;
+      this.totalLogsSent += batch.length;
+    } catch (err) {
+      logger.error({ err }, 'Failed to ingest batch, retrying in next flush');
+      this.failedBatchCount++;
+      this.queue = [...batch, ...this.queue];
+    }
+  }
+
+  public getMetrics() {
+    return {
+      queueSize: this.queue.length,
+      lastFlush: this.lastFlush,
+      averageBatchSize: this.totalBatchesSent > 0 ? (this.totalLogsSent / this.totalBatchesSent).toFixed(1) : 0,
+      failedBatchCount: this.failedBatchCount
+    };
+  }
+}
+
+export const ingester = new BatchingIngester();
 
 const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'dummy' });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy' });
@@ -205,9 +280,7 @@ export class InstrumentLLM {
       timestamp
     };
 
-    axios.post(this.ingestUrl, logPayload).catch(err => {
-      logger.error({ err }, 'Failed to ingest log');
-    });
+    ingester.enqueue(logPayload);
 
     if (!success && statusStr !== 'cancelled') {
       throw new Error(errorMsg || 'LLM generation failed');

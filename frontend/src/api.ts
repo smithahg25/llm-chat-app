@@ -1,17 +1,44 @@
 import axios from 'axios';
-import type { Conversation, Message, InferenceLog } from './types';
+import type { Conversation, Message, InferenceLog, PaginatedResponse } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const api = {
-  getConversations: async (q?: string): Promise<Conversation[]> => {
-    const url = q && q.trim() ? `${API_URL}/conversations/search?q=${encodeURIComponent(q)}` : `${API_URL}/conversations`;
+  login: async (username: string, password: string) => {
+    const res = await axios.post(`${API_URL}/auth/login`, { username, password });
+    if (res.data.token) {
+      localStorage.setItem('token', res.data.token);
+    }
+    return res.data;
+  },
+  
+  logout: async () => {
+    await axios.post(`${API_URL}/auth/logout`);
+    localStorage.removeItem('token');
+  },
+  
+  getMe: async () => {
+    const res = await axios.get(`${API_URL}/auth/me`);
+    return res.data;
+  },
+  getConversations: async (q?: string, page = 1, pageSize = 20): Promise<PaginatedResponse<Conversation>> => {
+    const url = q && q.trim() 
+      ? `${API_URL}/conversations/search?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}` 
+      : `${API_URL}/conversations?page=${page}&pageSize=${pageSize}`;
     const res = await axios.get(url);
     return res.data;
   },
 
-  getMessages: async (id: string): Promise<Message[]> => {
-    const res = await axios.get(`${API_URL}/conversations/${id}/messages`);
+  getMessages: async (id: string, page = 1, pageSize = 50): Promise<PaginatedResponse<Message>> => {
+    const res = await axios.get(`${API_URL}/conversations/${id}/messages?page=${page}&pageSize=${pageSize}`);
     return res.data;
   },
 
@@ -19,9 +46,21 @@ export const api = {
     await axios.delete(`${API_URL}/conversations/${id}`);
   },
 
-  getLogs: async (conversationId?: string): Promise<InferenceLog[]> => {
-    const url = conversationId ? `${API_URL}/logs?conversationId=${conversationId}` : `${API_URL}/logs`;
+  getLogs: async (conversationId?: string, page = 1, pageSize = 20): Promise<PaginatedResponse<InferenceLog>> => {
+    const url = conversationId 
+      ? `${API_URL}/logs?conversationId=${conversationId}&page=${page}&pageSize=${pageSize}` 
+      : `${API_URL}/logs?page=${page}&pageSize=${pageSize}`;
     const res = await axios.get(url);
+    return res.data;
+  },
+
+  getIngestMetrics: async () => {
+    const res = await axios.get(`${API_URL}/ingest/metrics`);
+    return res.data;
+  },
+
+  getThroughput: async (timeRange = '1h') => {
+    const res = await axios.get(`${API_URL}/throughput?timeRange=${timeRange}`);
     return res.data;
   },
 
@@ -41,10 +80,20 @@ export const api = {
     return new Promise((resolve, reject) => {
       fetch(`${API_URL}/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
         body: JSON.stringify({ content, conversationId, provider, model }),
         signal
       }).then(async (response) => {
+        if (!response.ok) {
+          if (response.status === 401) {
+             localStorage.removeItem('token');
+             window.location.reload();
+          }
+          return reject(new Error('Failed to stream'));
+        }
         if (!response.body) return reject(new Error('No response body'));
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');

@@ -9,9 +9,14 @@ interface SidebarProps {
   onSearch: (q: string) => void;
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (p: number) => void;
+  onPageSizeChange: (s: number) => void;
 }
 
-export default function Sidebar({ conversations, activeId, onSearch, onSelect, onDelete }: SidebarProps) {
+export default function Sidebar({ conversations, activeId, onSearch, onSelect, onDelete, page, pageSize, total, onPageChange, onPageSizeChange }: SidebarProps) {
   const [search, setSearch] = useState('');
   
   useEffect(() => {
@@ -83,6 +88,38 @@ export default function Sidebar({ conversations, activeId, onSearch, onSelect, o
         {conversations.length === 0 && (
           <div className="text-center text-gray-500 text-sm mt-10">No conversations found</div>
         )}
+      </div>
+
+      <div className="p-3 border-t border-gray-800 flex flex-col gap-2 text-xs text-gray-400 bg-gray-900">
+        <div className="flex justify-between items-center">
+          <span>Showing {Math.min((page - 1) * pageSize + 1, total)}-{Math.min(page * pageSize, total)} of {total}</span>
+          <select 
+            value={pageSize} 
+            onChange={e => { onPageSizeChange(Number(e.target.value)); onPageChange(1); }}
+            className="bg-gray-800 text-white rounded px-1 py-0.5 border border-gray-700"
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </select>
+        </div>
+        <div className="flex justify-between">
+          <button 
+            disabled={page === 1} 
+            onClick={() => onPageChange(page - 1)}
+            className="hover:text-white disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span>Page {page}</span>
+          <button 
+            disabled={page * pageSize >= total} 
+            onClick={() => onPageChange(page + 1)}
+            className="hover:text-white disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );

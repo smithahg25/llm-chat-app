@@ -1,11 +1,12 @@
 import 'dotenv/config';
+import jwt from 'jsonwebtoken';
 import express from 'express';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
-import { InstrumentLLM } from './sdk/llm';
+import { InstrumentLLM, ingester } from './sdk/llm';
 import { logger } from './logger';
 
 const REQUIRED_ENV_VARS = ['DATABASE_URL', 'OPENAI_API_KEY', 'GEMINI_API_KEY'];
@@ -55,6 +56,52 @@ app.get('/health', async (req, res) => {
   }
 });
 
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ username: ADMIN_USERNAME }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, user: { username: ADMIN_USERNAME } });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.json({ success: true });
+});
+
+const authMiddleware = (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing token' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err: any) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Expired token' });
+    }
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+app.get('/auth/me', authMiddleware, (req: any, res: any) => {
+  res.json({ user: req.user });
+});
+
+app.use('/ingest', authMiddleware);
+app.use('/chat', authMiddleware);
+app.use('/conversations', authMiddleware);
+app.use('/logs', authMiddleware);
+app.use('/throughput', authMiddleware);
+
 app.post('/ingest', async (req, res) => {
   try {
     const { conversationId, provider, model, latency, promptTokens, completionTokens, totalTokens, status, error, requestPreview, responsePreview, timestamp, requestId, sessionId } = req.body;
@@ -75,6 +122,48 @@ app.post('/ingest', async (req, res) => {
     logger.error({ error }, 'Error in /ingest');
     res.status(500).json({ error: 'Failed to ingest log' });
   }
+});
+
+app.post('/ingest/batch', async (req, res) => {
+  try {
+    const { logs } = req.body;
+    if (!Array.isArray(logs)) {
+      return res.status(400).json({ error: 'logs must be an array' });
+    }
+
+    const results = [];
+    let hasError = false;
+    for (const logPayload of logs) {
+      try {
+        const { conversationId, provider, model, latency, promptTokens, completionTokens, totalTokens, status, error, requestPreview, responsePreview, timestamp, requestId, sessionId } = logPayload;
+        if (!provider || !model || latency === undefined) {
+          results.push({ success: false, error: 'Missing required fields' });
+          hasError = true;
+          continue;
+        }
+        const created = await prisma.inferenceLog.create({
+          data: {
+            conversationId, provider, model, latency, promptTokens, completionTokens, totalTokens,
+            status, error: error ? String(error) : null, requestPreview, responsePreview,
+            requestId, sessionId,
+            timestamp: timestamp ? new Date(timestamp) : new Date()
+          }
+        });
+        results.push({ success: true, id: created.id });
+      } catch (err: any) {
+        results.push({ success: false, error: err.message });
+        hasError = true;
+      }
+    }
+    res.status(207).json({ summary: results, hasError });
+  } catch (error) {
+    logger.error({ error }, 'Error in /ingest/batch');
+    res.status(500).json({ error: 'Failed to ingest batch' });
+  }
+});
+
+app.get('/ingest/metrics', (req, res) => {
+  res.json(ingester.getMetrics());
 });
 
 app.post('/chat', async (req, res) => {
@@ -155,35 +244,55 @@ app.post('/chat/stream', async (req, res) => {
   }
 });
 
+const paginate = (req: any) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const pageSize = parseInt(req.query.pageSize as string) || 50;
+  return { page: Math.max(1, page), pageSize: Math.max(1, pageSize), skip: (Math.max(1, page) - 1) * Math.max(1, pageSize), take: Math.max(1, pageSize) };
+};
+
 app.get('/conversations', async (req, res) => {
-  const conversations = await prisma.conversation.findMany({ orderBy: { updatedAt: 'desc' } });
-  res.json(conversations);
+  if (!req.query.page) {
+    const conversations = await prisma.conversation.findMany({ orderBy: { updatedAt: 'desc' } });
+    return res.json(conversations);
+  }
+  const { page, pageSize, skip, take } = paginate(req);
+  const total = await prisma.conversation.count();
+  const data = await prisma.conversation.findMany({ orderBy: { updatedAt: 'desc' }, skip, take });
+  res.json({ data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
 app.get('/conversations/search', async (req, res) => {
   const { q } = req.query;
   const term = String(q);
-  if (!term) {
-    return res.json(await prisma.conversation.findMany({ orderBy: { updatedAt: 'desc' } }));
+  const where = term ? {
+    OR: [
+      { title: { contains: term } },
+      { messages: { some: { content: { contains: term } } } },
+      { logs: { some: { provider: { contains: term } } } },
+      { logs: { some: { model: { contains: term } } } }
+    ]
+  } : {};
+  
+  if (!req.query.page) {
+    return res.json(await prisma.conversation.findMany({ where, orderBy: { updatedAt: 'desc' } }));
   }
-  const conversations = await prisma.conversation.findMany({
-    where: {
-      OR: [
-        { title: { contains: term } },
-        { messages: { some: { content: { contains: term } } } },
-        { logs: { some: { provider: { contains: term } } } },
-        { logs: { some: { model: { contains: term } } } }
-      ]
-    },
-    orderBy: { updatedAt: 'desc' }
-  });
-  res.json(conversations);
+
+  const { page, pageSize, skip, take } = paginate(req);
+  const total = await prisma.conversation.count({ where });
+  const data = await prisma.conversation.findMany({ where, orderBy: { updatedAt: 'desc' }, skip, take });
+  res.json({ data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
 app.get('/conversations/:id/messages', async (req, res) => {
   const { id } = req.params;
-  const messages = await prisma.message.findMany({ where: { conversationId: id }, orderBy: { timestamp: 'asc' } });
-  res.json(messages);
+  if (!req.query.page) {
+    const messages = await prisma.message.findMany({ where: { conversationId: id }, orderBy: { timestamp: 'asc' } });
+    return res.json(messages);
+  }
+  const { page, pageSize, skip, take } = paginate(req);
+  const total = await prisma.message.count({ where: { conversationId: id } });
+  const data = await prisma.message.findMany({ where: { conversationId: id }, orderBy: { timestamp: 'asc' }, skip, take });
+  res.json({ data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
 app.delete('/conversations/:id', async (req, res) => {
@@ -195,12 +304,68 @@ app.delete('/conversations/:id', async (req, res) => {
 app.get('/logs', async (req, res) => {
   const { conversationId } = req.query;
   const whereClause = conversationId ? { conversationId: String(conversationId) } : {};
+  if (!req.query.page) {
+    const logs = await prisma.inferenceLog.findMany({ where: whereClause, orderBy: { timestamp: 'desc' }, take: 100 });
+    return res.json(logs);
+  }
+  const { page, pageSize, skip, take } = paginate(req);
+  const total = await prisma.inferenceLog.count({ where: whereClause });
+  const data = await prisma.inferenceLog.findMany({ where: whereClause, orderBy: { timestamp: 'desc' }, skip, take });
+  res.json({ data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+});
+
+app.get('/throughput', async (req, res) => {
+  const { timeRange } = req.query;
+  const now = new Date();
+  let startTime = new Date();
+
+  if (timeRange === '1h') startTime.setHours(now.getHours() - 1);
+  else if (timeRange === '24h') startTime.setHours(now.getHours() - 24);
+  else if (timeRange === '7d') startTime.setDate(now.getDate() - 7);
+  else startTime.setHours(now.getHours() - 1);
+
   const logs = await prisma.inferenceLog.findMany({
-    where: whereClause,
-    orderBy: { timestamp: 'desc' },
-    take: 100
+    where: { timestamp: { gte: startTime } },
+    orderBy: { timestamp: 'asc' }
   });
-  res.json(logs);
+
+  const total = logs.length;
+  const success = logs.filter(l => l.status === 'success').length;
+  const failure = logs.filter(l => l.status === 'failure').length;
+  const cancelled = logs.filter(l => l.status === 'cancelled').length;
+
+  const seconds = Math.max(1, (now.getTime() - startTime.getTime()) / 1000);
+  const minutes = Math.max(1, seconds / 60);
+  
+  const rps = total / seconds;
+  const rpm = total / minutes;
+
+  const chartMap = new Map<string, number>();
+  logs.forEach(l => {
+    const date = new Date(l.timestamp);
+    let key = '';
+    if (timeRange === '1h') {
+      key = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+    } else {
+      key = `${(date.getMonth()+1)}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:00`;
+    }
+    chartMap.set(key, (chartMap.get(key) || 0) + 1);
+  });
+
+  const chartData = Array.from(chartMap.entries()).map(([time, count]) => ({ time, count }));
+
+  res.json({
+    total,
+    success,
+    failure,
+    cancelled,
+    rps: rps.toFixed(2),
+    rpm: rpm.toFixed(2),
+    successRate: total ? ((success/total)*100).toFixed(1) : "0.0",
+    failureRate: total ? ((failure/total)*100).toFixed(1) : "0.0",
+    cancellationRate: total ? ((cancelled/total)*100).toFixed(1) : "0.0",
+    chartData
+  });
 });
 
 const PORT = process.env.PORT || 3001;
