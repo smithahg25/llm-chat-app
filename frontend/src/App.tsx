@@ -5,6 +5,7 @@ import MetadataPanel from './components/MetadataPanel';
 import type { Conversation, InferenceLog } from './types';
 import { api } from './api';
 import { Toaster, toast } from 'sonner';
+import { Menu, Info, X, LogOut } from 'lucide-react';
 
 const PROVIDER_MODELS = {
   gemini: ['gemini-2.0-flash', 'gemini-3.5-flash'],
@@ -56,6 +57,8 @@ function Login({ onLogin }: { onLogin: () => void }) {
 }
 
 function App() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMetadataOpen, setIsMetadataOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [convPage, setConvPage] = useState(1);
   const [convPageSize, setConvPageSize] = useState(20);
@@ -124,64 +127,92 @@ function App() {
   if (!isAuthenticated) return <Login onLogin={() => { setIsAuthenticated(true); loadConversations(); }} />;
 
   return (
-    <div className="flex h-screen bg-black overflow-hidden font-sans">
+    <div className="flex h-screen bg-black overflow-hidden font-sans relative">
       <Toaster theme="dark" position="top-right" />
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        onSearch={(q) => { setSearchQuery(q); setConvPage(1); }}
-        onSelect={(id) => {
-          if (id === null) setNewChatCounter(c => c + 1);
-          setActiveId(id);
-        }}
-        onDelete={async (id) => {
-          await api.deleteConversation(id);
-          if (activeId === id) setActiveId(null);
-          loadConversations(searchQuery);
-        }}
-        page={convPage}
-        pageSize={convPageSize}
-        total={convTotal}
-        onPageChange={setConvPage}
-        onPageSizeChange={setConvPageSize}
-      />
-      <div className="flex-1 flex flex-col bg-gray-950">
-        <div className="flex justify-end items-center gap-2 p-3 bg-gray-900 border-b border-gray-800 shrink-0">
-           <select 
-             className="bg-gray-800 text-white px-3 py-1 rounded-md text-sm border border-gray-700 focus:outline-none" 
-             value={provider} 
-             onChange={(e) => {
-               const newProvider = e.target.value as keyof typeof PROVIDER_MODELS;
-               if (newProvider !== 'groq') {
-                 toast.error("You don't have a paid API key for this provider. Please use Groq.");
-                 return;
-               }
-               setProvider(newProvider);
-               setModel(PROVIDER_MODELS[newProvider][0]);
-             }}
-           >
-             <option value="gemini">Gemini</option>
-             <option value="openai">OpenAI</option>
-             <option value="anthropic">Anthropic</option>
-             <option value="groq">Groq</option>
-           </select>
-           <select 
-             className="bg-gray-800 text-white px-3 py-1 rounded-md text-sm border border-gray-700 w-48 focus:outline-none" 
-             value={model} 
-             onChange={(e) => setModel(e.target.value)}
-           >
-             {PROVIDER_MODELS[provider].map(m => (
-               <option key={m} value={m}>{m}</option>
-             ))}
-           </select>
-           <button 
-             onClick={() => { api.logout(); setIsAuthenticated(false); setConversations([]); setLogs([]); setActiveId(null); }}
-             className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-md text-sm transition-colors"
-           >
-             Logout
+      
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)} />
+      )}
+      
+      {/* Sidebar Container */}
+      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <Sidebar
+          conversations={conversations}
+          activeId={activeId}
+          onSearch={(q) => { setSearchQuery(q); setConvPage(1); }}
+          onSelect={(id) => {
+            if (id === null) setNewChatCounter(c => c + 1);
+            setActiveId(id);
+            setIsSidebarOpen(false);
+          }}
+          onDelete={async (id) => {
+            await api.deleteConversation(id);
+            if (activeId === id) setActiveId(null);
+            loadConversations(searchQuery);
+          }}
+          page={convPage}
+          pageSize={convPageSize}
+          total={convTotal}
+          onPageChange={setConvPage}
+          onPageSizeChange={setConvPageSize}
+        />
+        {isSidebarOpen && (
+          <button className="absolute top-3 -right-12 text-gray-300 hover:text-white md:hidden bg-gray-800 rounded-full p-1.5 border border-gray-700" onClick={() => setIsSidebarOpen(false)}>
+            <X size={20} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col bg-gray-950 min-w-0">
+        <div className="flex justify-between md:justify-end items-center gap-2 p-3 bg-gray-900 border-b border-gray-800 shrink-0">
+           <button className="md:hidden text-gray-300 hover:text-white" onClick={() => setIsSidebarOpen(true)}>
+             <Menu size={24} />
+           </button>
+           
+           <div className="flex items-center gap-2 flex-1 md:flex-none justify-end">
+             <select 
+               className="bg-gray-800 text-white px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm border border-gray-700 focus:outline-none w-24 md:w-auto truncate" 
+               value={provider} 
+               onChange={(e) => {
+                 const newProvider = e.target.value as keyof typeof PROVIDER_MODELS;
+                 if (newProvider !== 'groq') {
+                   toast.error("You don't have a paid API key for this provider. Please use Groq.");
+                   return;
+                 }
+                 setProvider(newProvider);
+                 setModel(PROVIDER_MODELS[newProvider][0]);
+               }}
+             >
+               <option value="gemini">Gemini</option>
+               <option value="openai">OpenAI</option>
+               <option value="anthropic">Anthropic</option>
+               <option value="groq">Groq</option>
+             </select>
+             <select 
+               className="bg-gray-800 text-white px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm border border-gray-700 w-32 md:w-48 focus:outline-none truncate" 
+               value={model} 
+               onChange={(e) => setModel(e.target.value)}
+             >
+               {PROVIDER_MODELS[provider].map(m => (
+                 <option key={m} value={m}>{m}</option>
+               ))}
+             </select>
+             <button 
+               onClick={() => { api.logout(); setIsAuthenticated(false); setConversations([]); setLogs([]); setActiveId(null); }}
+               className="bg-red-600 hover:bg-red-700 text-white p-1.5 md:px-3 md:py-1.5 rounded-md text-sm transition-colors flex items-center justify-center"
+               title="Logout"
+             >
+               <LogOut size={16} className="md:hidden" />
+               <span className="hidden md:inline">Logout</span>
+             </button>
+           </div>
+           
+           <button className="xl:hidden text-gray-300 hover:text-white ml-2" onClick={() => setIsMetadataOpen(true)}>
+             <Info size={24} />
            </button>
         </div>
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
           <Chat
             key={activeId || `new-${newChatCounter}`}
             activeId={activeId}
@@ -195,15 +226,29 @@ function App() {
           />
         </div>
       </div>
-      <MetadataPanel 
-        logs={logs} 
-        page={logsPage}
-        pageSize={logsPageSize}
-        total={logsTotal}
-        onPageChange={setLogsPage}
-        onPageSizeChange={setLogsPageSize}
-        ingestMetrics={ingestMetrics}
-      />
+      
+      {/* Mobile Metadata Overlay */}
+      {isMetadataOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 xl:hidden" onClick={() => setIsMetadataOpen(false)} />
+      )}
+
+      {/* Metadata Container */}
+      <div className={`fixed inset-y-0 right-0 z-50 transform transition-transform duration-300 xl:relative xl:translate-x-0 ${isMetadataOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        {isMetadataOpen && (
+          <button className="absolute top-3 -left-12 text-gray-300 hover:text-white xl:hidden bg-gray-800 rounded-full p-1.5 border border-gray-700" onClick={() => setIsMetadataOpen(false)}>
+            <X size={20} />
+          </button>
+        )}
+        <MetadataPanel 
+          logs={logs} 
+          page={logsPage}
+          pageSize={logsPageSize}
+          total={logsTotal}
+          onPageChange={setLogsPage}
+          onPageSizeChange={setLogsPageSize}
+          ingestMetrics={ingestMetrics}
+        />
+      </div>
     </div>
   );
 }
