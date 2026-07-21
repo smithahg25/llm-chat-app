@@ -234,13 +234,6 @@ This will containerize both the frontend and backend services and attach them to
 - Batching Ingestion: In-memory batching reduces database write pressure but introduces volatility. If the Node.js process crashes before a flush, up to 5 seconds of telemetry data could be lost.
 - Streaming Redaction: PII redaction currently occurs after the full string is assembled in memory, rather than being parsed natively on the stream chunks in transit, to simplify the regex logic.
 
-## Future Improvements
-
-- PostgreSQL Migration: Replace SQLite to eliminate write-concurrency limits.
-- Redis Caching: Introduce semantic caching to deduplicate repeated LLM queries.
-- Message Broker: Move the `/ingest` queue logic out of Node.js memory and into a distributed queue like RabbitMQ or Kafka.
-- WebSockets: Upgrade from unidirectional SSE to bidirectional WebSockets to support real-time collaborative editing features.
-
 ## Demo
 
 Live Application:
